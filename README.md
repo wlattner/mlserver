@@ -32,8 +32,9 @@ TODO
 - [ ] better model selection in fit.py
 - [ ] better project name
 - [ ] config options
-- [ ] csv file upload for fit/predict input
+- [X] csv file upload for fit/predict input
 - [ ] docker container for fit.py and predict.py
+- [ ] tests
 
 API
 ===
@@ -204,12 +205,34 @@ sepal_length | sepal_width | petal_length | petal_width | species
 }
 ```
 
-This will return `201 Created` along with the id of the newly created model. The model will be fitted in the background.
+This will return `202 Accepted` along with the id of the newly created model. The model will be fitted in the background.
 
 ```json
 {
   "model_id": "07421303-62f9-40f3-bf14-23cf44af05e2"
 }
+```
+
+Alternatively, the data for fitting a model can be uploaded as a csv file. The file must have a header row and the target variable must be the first column. The table above would be encoded as:
+	
+	"species","sepal_length","sepal_width","petal_length","petal_width"
+	"setosa",5.1,3.5,1.4,0.2
+	"setosa",4.9,3,1.4,0.2
+	"setosa",4.7,3.2,1.3,0.2
+	"setosa",4.6,3.1,1.5,0.2
+	"setosa",5,3.6,1.4,0.2
+	"setosa",5.4,3.9,1.7,0.4
+	"setosa",4.6,3.4,1.4,0.3
+	"setosa",5,3.4,1.5,0.2
+	"setosa",4.4,2.9,1.4,0.2
+
+The request should be encoded as multipart/form with the following fields:
+
+* `name` the name to use for the model
+* `file` the csv file
+
+```bash
+curl --form name="iris model csv" --form file=@iris.csv http://localhost:5000/models
 ```
 
 Predict
@@ -302,6 +325,8 @@ The response will contain class probabilities for each example submitted:
   "model_id": "0e12bb73-e49a-4dcd-87aa-cb0338b1c758"
 }
 ```
+
+Alternatively, the data could be uploaded as a csv file, see above description for fitting a model using a csv file. In the case of making predictions, the csv file should not have the label/target data in the first column.
 
 Start Model
 ----------

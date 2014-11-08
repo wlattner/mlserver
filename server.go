@@ -26,15 +26,18 @@ TODO:
 
 import (
 	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -50,20 +53,13 @@ type Prediction struct {
 	Labels  []map[string]float64 `json:"labels"`
 }
 
-// PredictionReq is an incoming POST/PUT to /models/<id>
-type PredictionReq struct {
+// ModelReq represents an incoming request for fit or predict
+type ModelReq struct {
 	ModelID string                   `json:"model_id"`
+	Name    string                   `json:"name"`
+	Date    time.Time                `json:"created_at"`
 	Data    []map[string]interface{} `json:"data"`
-}
-
-// FitReq is an incoming POST to /models, also passed to the fit.py as json
-type FitReq struct {
-	ModelID string                   `json:"model_id"`
-	Data    []map[string]interface{} `json:"data"`
-	// labels could be numeric or string
-	Labels []interface{} `json:"labels"`
-	Name   string        `json:"name"`
-	Date   time.Time     `json:"created_at"`
+	Labels  []interface{}            `json:"labels"`
 }
 
 // Model represents a previously fitted model
@@ -92,7 +88,7 @@ type Model struct {
 
 // Predict encodes the client supplied data, passes it to the Python process for
 // the model via zmq, parses and returns the response.
-func (m *Model) Predict(r PredictionReq) Prediction {
+func (m *Model) Predict(r ModelReq) Prediction {
 	// should find a way to do this w/o re-encoding
 	var buf bytes.Buffer
 	err := json.NewEncoder(&buf).Encode(r)
@@ -285,7 +281,7 @@ func (r *ModelRepo) IndexModelDir() error {
 // When the command completes, go checks the exit status, anything other than exit(0)
 // will result in a non-nil value for the error returned by cmd.Run().
 
-func fitModel(m *Model, d FitReq) {
+func fitModel(m *Model, d ModelReq) {
 	log.Infof("started fitting model %v", m.ID)
 	// write data to temp file
 	f, err := ioutil.TempFile("", m.ID)
@@ -401,6 +397,114 @@ func startModel(m *Model) error {
 }
 
 //-----------------------------------------------------------------------------
+// Training Data Parsing
+//-----------------------------------------------------------------------------
+
+// ParseCSV parses a csv file with the following format:
+//
+//		<target_var>,<var_1>,<var_2>,...<var_n>
+//		"true",1.5,"red",...
+//
+// returning a slice of maps representing the feature:value pairs for each row,
+// a slice of labels, and an error. If the hasTarget flag is true, the first
+// column of input data will be copied to the label slice and excluded from the
+// feature:value pairs. If hasTarget is false, the label slice will be empty and
+// all columns will be included in the feature:value pairs.
+func ParseCSV(r io.Reader, hasTarget bool) (ModelReq, error) {
+	reader := csv.NewReader(r)
+
+	// grab the var names from the first row
+	fieldNames, err := reader.Read()
+	if err != nil {
+		return ModelReq{}, err
+	}
+
+	xStart := 0 // column where feature data starts
+	if hasTarget {
+		xStart = 1
+	}
+
+	var d ModelReq
+
+	for {
+		row, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return ModelReq{}, err
+		}
+
+		if len(row) != len(fieldNames) {
+			return ModelReq{}, errors.New("mlserver: csv header and row length mismatch")
+		}
+
+		if hasTarget {
+			// first column is the target variable
+			d.Labels = append(d.Labels, row[0])
+		}
+
+		// save the rest as <feature_name>:<value> pairs
+		features := make(map[string]interface{})
+		for i := xStart; i < len(row); i++ {
+			val := row[i]
+			// check for numeric value
+			numVal, err := strconv.ParseFloat(row[i], 64)
+			if err != nil {
+				features[fieldNames[i]] = val // use string val
+			} else {
+				features[fieldNames[i]] = numVal // use numeric val
+			}
+		}
+		d.Data = append(d.Data, features)
+	}
+
+	return d, nil
+}
+
+var ErrCSVFileMissing = errors.New("csv file missing")
+
+// parseFileUpload parses ModelReq from a csv file uploaded in a POST request.
+// the hasTarget arg should be true when the uploaded csv file has the target
+// variable in the first column (i.e. when parsing a request for fitting a model).
+// ErrCSVFileMissing will be returned if there is no file associated with the key
+// 'file'.
+func parseFileUpload(r *http.Request, hasTarget bool) (ModelReq, error) {
+
+	err := r.ParseMultipartForm(1 << 28)
+	if err != nil {
+		return ModelReq{}, err
+	}
+
+	defer func() {
+		err := r.MultipartForm.RemoveAll()
+		if err != nil {
+			log.Error("error removing file uploads ", err)
+		}
+	}()
+
+	files, ok := r.MultipartForm.File["file"]
+	if !ok || len(files) < 1 {
+		return ModelReq{}, ErrCSVFileMissing
+	}
+
+	f, err := files[0].Open()
+	if err != nil {
+		return ModelReq{}, err
+	}
+	defer f.Close()
+
+	d, err := ParseCSV(f, hasTarget)
+	if err != nil {
+		return ModelReq{}, err
+	}
+
+	d.Name = strings.Join(r.MultipartForm.Value["name"], " ")
+
+	return d, nil
+}
+
+//-----------------------------------------------------------------------------
 // HTTP Handlers
 //-----------------------------------------------------------------------------
 
@@ -422,9 +526,11 @@ func HandleModel(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		writeJSON(w, m)
+		writeJSONOK(w, m)
 
 	case "PUT", "POST": // predict
+		var err error
+
 		m, err := Models.Get(modelID)
 		if err == ErrModelNotFound {
 			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
@@ -435,16 +541,26 @@ func HandleModel(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		var newData PredictionReq
-		err = json.NewDecoder(r.Body).Decode(&newData)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
+		var newData ModelReq
+
+		if r.Header.Get("Content-Type") == "application/json" {
+			err = json.NewDecoder(r.Body).Decode(&newData)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+		} else {
+			newData, err = parseFileUpload(r, false)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
 		}
+
 		newData.ModelID = modelID
 
 		pred := m.Predict(newData)
-		writeJSON(w, pred)
+		writeJSONOK(w, pred)
 
 	default:
 		notAllowed(w)
@@ -452,20 +568,40 @@ func HandleModel(w http.ResponseWriter, r *http.Request) {
 
 }
 
-// HandleNewModel is the http handler for requests made to /models, POST
-// fits a new model with the supplied data. Other HTTP methods result in
-// a Method Not Allowed response.
-func HandleNewModel(w http.ResponseWriter, r *http.Request) {
+// HandleModels is the http handler for requests made to /models, POST
+// fits a new model with the supplied data. Data for fitting the model can
+// be encoded as JSON in the request body or uploaded as a csv file. GET responds
+// with a list of all models in the index. Other HTTP methods result in a
+// Method Not Allowed response.
+func HandleModels(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET": // list models
-		writeJSON(w, Models.All())
+		writeJSONOK(w, Models.All())
 
 	case "POST": // new model
-		var trainData FitReq
-		err := json.NewDecoder(r.Body).Decode(&trainData)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
+
+		var trainData ModelReq
+		var err error
+
+		if r.Header.Get("Content-Type") == "application/json" {
+			// try parsing as json
+			err = json.NewDecoder(r.Body).Decode(&trainData)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+
+		} else {
+			// parse as csv file upload
+			trainData, err = parseFileUpload(r, true)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if trainData.Name == "" {
+				http.Error(w, "missing model name", http.StatusBadRequest)
+				return
+			}
 		}
 
 		m := Models.NewModel()
@@ -477,7 +613,7 @@ func HandleNewModel(w http.ResponseWriter, r *http.Request) {
 			m.ID,
 		}
 
-		writeJSON(w, resp)
+		writeJSON(w, resp, http.StatusAccepted)
 
 	default:
 		notAllowed(w)
@@ -500,7 +636,7 @@ func HandleRunningModels(w http.ResponseWriter, r *http.Request) {
 			}
 			model.runLock.RUnlock()
 		}
-		writeJSON(w, runningModels)
+		writeJSONOK(w, runningModels)
 
 	case "PUT", "POST": // start a model
 		var msg struct {
@@ -558,8 +694,14 @@ func HandleStopModel(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 }
 
-func writeJSON(w http.ResponseWriter, v interface{}) {
+func writeJSONOK(w http.ResponseWriter, v interface{}) {
+	writeJSON(w, v, http.StatusOK)
+}
+
+func writeJSON(w http.ResponseWriter, v interface{}, status int) {
+
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
 	err := json.NewEncoder(w).Encode(v)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -581,7 +723,7 @@ func main() {
 	log.Info("finished indexing model directory")
 
 	m := http.NewServeMux()
-	m.HandleFunc("/models", HandleNewModel)
+	m.HandleFunc("/models", HandleModels)
 	m.HandleFunc("/models/", HandleModel)
 	m.HandleFunc("/models/running", HandleRunningModels)
 	m.HandleFunc("/models/running/", HandleStopModel)
