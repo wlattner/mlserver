@@ -149,7 +149,7 @@ The request body should be JSON with the following fields:
 * `data` an array of objects, each element represents a single row/observation
 * `labels` an array of strings representing the target value/label of each training example
 
-To fit a model for the predicting the species variable for the Iris data:
+To fit a model for predicting the species variable from the [Iris data](http://en.wikipedia.org/wiki/Iris_flower_data_set):
 
 sepal_length | sepal_width | petal_length | petal_width | species
 ------------ | ----------- | ------------ | ----------- | -------
