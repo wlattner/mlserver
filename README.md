@@ -12,7 +12,9 @@ go get github.com/wlattner/mlserver
 ```
 This will clone the repo to `$GOPATH/src/github.com/wlattner/mlserver` and copy the `mlserver` binary to `$GOPATH/bin`.
 
-The code in `fit.py` and `train.py` require Python 3, NumPy, SciPy and Scikit-Learn; these are sometimes tricky to install, look elsewhere for instructions.
+The code in `fit.py` and `predict.py` require Python 3, NumPy, SciPy and Scikit-Learn; these are sometimes tricky to install, look elsewhere for instructions.
+
+If you modify fit.py or predict.py, run `make`. These two files must be included in the Go source as raw string values, `make` will rewrite fit_py.go and predict_py.go using the current version of fit.py and predict.py
 
 ### Running
 
