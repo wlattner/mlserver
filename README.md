@@ -34,6 +34,7 @@ TODO
 - [ ] config options
 - [X] csv file upload for fit/predict input
 - [ ] docker container for fit.py and predict.py
+- [ ] use kubernetes for fit/predict workers
 - [ ] tests
 
 API
