@@ -11,13 +11,21 @@ uses the default arguments.
 */
 
 import (
+	"flag"
 	"net/http"
 
 	"github.com/coreos/go-log/log"
 )
 
+var (
+	port     = flag.String("port", "5000", "port for api server")
+	modelDir = flag.String("model-path", "models", "location of model directory")
+)
+
 func main() {
-	models := NewModelRepo("models")
+	flag.Parse()
+
+	models := NewModelRepo(*modelDir)
 
 	log.Info("started indexing model directory")
 	models.IndexModelDir()
@@ -25,6 +33,6 @@ func main() {
 
 	s := NewAPIHandler(models)
 
-	log.Info("listening on http://localhost:5000")
-	log.Fatalln(http.ListenAndServe(":5000", requestLogger(s)))
+	log.Info("listening on http://localhost:" + *port)
+	log.Fatalln(http.ListenAndServe(":"+*port, requestLogger(s)))
 }
