@@ -3,7 +3,7 @@ all: mlserver
 install: mlserver
 	go install
 
-mlserver: fit_py.go predict_py.go server.go
+mlserver: fit_py.go predict_py.go http_util.go main.go models.go parse.go workers.go
 	go build
 
 fit_py.go: fit.py
