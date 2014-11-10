@@ -1,0 +1,29 @@
+{
+	"ImportPath": "github.com/wlattner/mlserver",
+	"GoVersion": "go1.3.3",
+	"Deps": [
+		{
+			"ImportPath": "bitbucket.org/kardianos/osext",
+			"Comment": "null-15",
+			"Rev": "44140c5fc69ecf1102c5ef451d73cd98ef59b178"
+		},
+		{
+			"ImportPath": "code.google.com/p/go-uuid/uuid",
+			"Comment": "null-12",
+			"Rev": "7dda39b2e7d5e265014674c5af696ba4186679e9"
+		},
+		{
+			"ImportPath": "github.com/coreos/go-log/log",
+			"Rev": "70d039bee4b0e389e5be560491d8291708506f59"
+		},
+		{
+			"ImportPath": "github.com/coreos/go-systemd/journal",
+			"Comment": "v2-39-ge3e4f60",
+			"Rev": "e3e4f602334ec3e1c2cd68322a1284903c62f940"
+		},
+		{
+			"ImportPath": "github.com/pebbe/zmq4",
+			"Rev": "31dba2dadf451d949a4169b7dfe24f18ac903c4e"
+		}
+	]
+}
