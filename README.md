@@ -134,6 +134,7 @@ Get Models
     },
     "running": false,
     "trained": true
+  }
 ]
 ```
 
