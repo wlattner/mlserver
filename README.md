@@ -5,6 +5,31 @@ This is a simple application that provides an HTTP/JSON api for machine learning
 
 ### Building/Installing
 
+Make sure you have mercurial and zeromq installed:
+
+**Mac/Homebrew**
+```bash
+brew install zeromq
+brew install mercurial
+```
+**Ubuntu**
+```bash
+sudo apt-get install mercurial
+sudo apt-get install libtool autoconf automake uuid-dev build-essential
+```
+**Fetch and Build zmq4**
+```bash
+curl -O http://download.zeromq.org/zeromq-4.0.5.tar.gz
+tar zxvf zeromq-4.0.5.tar.gz && cd zeromq-4.0.5
+./configure
+make
+sudo make install
+```
+If you get `error while loading shared libraries: libzmq.so.4` when trying to run mlserver on Ubuntu, try updating the library cache.
+```bash
+sudo ldconfig
+```
+
 Building the app is fairly simple (assuming Go is installed and $GOPAH is set):
 
 ```bash
@@ -12,7 +37,15 @@ go get github.com/wlattner/mlserver
 ```
 This will clone the repo to `$GOPATH/src/github.com/wlattner/mlserver` and copy the `mlserver` binary to `$GOPATH/bin`.
 
-The code in `fit.py` and `predict.py` require Python 3, NumPy, SciPy and Scikit-Learn; these are sometimes tricky to install, look elsewhere for instructions.
+The code in `fit.py` and `predict.py` require Python 3, NumPy, SciPy and Scikit-Learn; these are sometimes tricky to install, look elsewhere for help.
+
+**Ubuntu**
+```bash
+sudo apt-get install build-essential python3-dev python3-setuptools python3-numpy python3-scipy libatlas-dev libatlas3gf-base
+sudo apt-get install python3-pip
+pip3 install scikit-learn
+pip3 install pyzmq
+```
 
 If you modify fit.py or predict.py, run `make`. These two files must be included in the Go source as raw string values, `make` will rewrite fit_py.go and predict_py.go using the current version of fit.py and predict.py
 
